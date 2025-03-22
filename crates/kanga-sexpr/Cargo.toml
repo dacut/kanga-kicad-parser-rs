@@ -1,0 +1,13 @@
+[package]
+name = "kanga-sexpr"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+license = "Apache-2.0"
+repository = "https://github.com/dacut/kanga-kicad-parser-rs"
+homepage = "https://github.com/dacut/kanga-kicad-parser-rs"
+description = "KiCad s-expression types"
+
+[dependencies]
+lexpr = "0.2.7"
+kanga-sexpr-macro = { path = "../kanga-sexpr-macro" }

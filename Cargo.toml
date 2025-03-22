@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/kanga-kicad-parser",
+    "crates/kanga-sexpr",
+    "crates/kanga-sexpr-macro",
+]
+resolver = "2"
+
+[workspace.package]
+authors = ["David Cuthbert <dacut@kanga.org>"]
+edition = "2021"
+homepage = "https://github.com/dacut/kanga-kicad-parser-rs"
+license = "Apache-2.0"
+repository = "https://github.com/dacut/kanga-kicad-parser-rs.git"
+version = "0.1.0"

@@ -1,0 +1,14 @@
+[package]
+name = "kanga-kicad-parser"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+license = "Apache-2.0"
+repository = "https://github.com/dacut/kanga-kicad-parser-rs.git"
+homepage = "https://github.com/dacut/kanga-kicad-parser-rs"
+description = "KiCad file parser"
+
+[dependencies]
+lexpr = "0.2.7"
+kanga-sexpr = { path = "../kanga-sexpr" }
+uuid = { version = "1.15.1", features = ["v7"] }
