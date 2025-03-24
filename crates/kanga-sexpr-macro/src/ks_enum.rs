@@ -16,38 +16,39 @@ use {
 /// Declaration of an `enum` as an s-expression.
 #[derive(Debug)]
 pub(crate) struct EnumDecl {
-    pub(crate) meta: Vec<Attribute>,
-    pub(crate) vis: Visibility,
-    pub(crate) rust_name: Ident,
-    pub(crate) variants: VariantVec,
+    meta: Vec<Attribute>,
+    vis: Visibility,
+    rust_name: Ident,
+    variants: VariantVec,
 }
 
 /// A variant within an `enum` declaration.
 #[derive(Debug)]
-pub(crate) struct Variant {
-    pub(crate) meta: Vec<Attribute>,
-    pub(crate) rust_name: Ident,
-    pub(crate) sexpr_name: Ident,
+struct Variant {
+    meta: Vec<Attribute>,
+    sexpr_name: Ident,
+    rust_name: Ident,
 }
 
 /// A `Vec<Variant>` that can be parsed.
 #[derive(Debug)]
-pub(crate) struct VariantVec(Vec<Variant>);
+struct VariantVec(Vec<Variant>);
 
 impl EnumDecl {
     /// Generate the Rust code for the enum declaration.
-    pub(crate) fn generate(&self) -> TokenStream {
+    pub(crate) fn gen(&self) -> TokenStream {
         let mut result = TokenStream::new();
-        result.extend(self.generate_enum_decl());
-        todo!("Add impls");
+        result.extend(self.gen_enum_decl());
+        result.extend(self.gen_parse_impl());
+        result
     }
 
     /// Generate the enum decl itself.
-    pub(crate) fn generate_enum_decl(&self) -> TokenStream {
+    fn gen_enum_decl(&self) -> TokenStream {
         let mut result = TokenStream::new();
         let vis = &self.vis;
         let rust_name = &self.rust_name;
-        let variant_decls = self.variants.generate_decls();
+        let variant_decls = self.variants.gen_decls();
 
         for meta in &self.meta {
             result.extend(meta.to_token_stream());
@@ -58,6 +59,46 @@ impl EnumDecl {
         });
 
         result
+    }
+
+    /// Generate the parse implementation for the enum.
+    fn gen_parse_impl(&self) -> TokenStream {
+        let mut result = TokenStream::new();
+        let rust_name = &self.rust_name;
+        let mut enum_expected = TokenStream::new(); // The expected symbols for the enum.
+        let mut match_arms = TokenStream::new();    // Handlers for the `match sym` statement.
+
+        for variant in &self.variants {
+            // Add this variant's sexpr name to the array of expected symbols for the enum.
+            let sexpr_name = variant.sexpr_name.to_string();
+            let rust_name = &variant.rust_name;
+            enum_expected.extend(quote! { #sexpr_name, });
+
+            // Add a match arm for this variant.
+            match_arms.extend(quote! {
+                #sexpr_name => Ok(Self::#rust_name),
+            })
+        }
+
+        quote! {
+            impl ::std::convert::TryFrom<&::lexpr::Value> for #rust_name {
+                type Error = ::kanga_sexpr::ParseError;
+
+                fn try_from(value: &::lexpr::Value) -> ::std::result::Result<Self, Self::Error> {
+                    const EXPECTED: &'static [&'static str] = &[#enum_expected];
+
+                    let Some(sym) = value.as_symbol() else {
+                        return Err(::kanga_sexpr::ParseError::ExpectedEnumSymbol(value.clone(), EXPECTED));
+                    };
+
+                    match sym {
+                        #match_arms
+                        _ => Err(::kanga_sexpr::ParseError::ExpectedEnumSymbol(value.clone(), EXPECTED)),
+                    }
+                }
+            }
+        }
+        
     }
 
     /// Parse a struct declaration when the attributes and visibility have already been parsed.
@@ -87,7 +128,7 @@ impl Parse for EnumDecl {
 }
 
 impl Variant {
-    pub(crate) fn generate_decl(&self) -> TokenStream {
+    fn gen_decl(&self) -> TokenStream {
         let mut result = TokenStream::new();
         for meta in &self.meta {
             result.extend(meta.to_token_stream());
@@ -116,10 +157,10 @@ impl Parse for Variant {
     fn parse(input: ParseStream) -> ParseResult<Self> {
         let meta = input.call(Attribute::parse_outer)?;
         let name: Ident = input.parse()?;
-        let (rust_name, sexpr_name) = if input.peek(Token![=>]) {
+        let (sexpr_name, rust_name) = if input.peek(Token![=>]) {
             input.parse::<Token![=>]>()?;
-            let sexpr_name = input.parse()?;
-            (name, sexpr_name)
+            let rust_name = input.parse()?;
+            (name, rust_name)
         } else {
             (name.clone(), name)
         };
@@ -130,18 +171,18 @@ impl Parse for Variant {
 
         Ok(Self {
             meta,
-            rust_name,
             sexpr_name,
+            rust_name,
         })
     }
 }
 
 impl VariantVec {
     /// Generate the variant declarations for the enum.
-    pub(crate) fn generate_decls(&self) -> TokenStream {
+    fn gen_decls(&self) -> TokenStream {
         let mut result = TokenStream::new();
         for variant in self.iter() {
-            result.extend(variant.generate_decl());
+            result.extend(variant.gen_decl());
         }
         result
     }
@@ -180,6 +221,15 @@ impl IntoIterator for VariantVec {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a VariantVec {
+    type Item = &'a Variant;
+    type IntoIter = std::slice::Iter<'a, Variant>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
     }
 }
 

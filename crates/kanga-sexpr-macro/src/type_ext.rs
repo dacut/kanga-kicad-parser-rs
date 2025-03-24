@@ -1,6 +1,6 @@
 use {
     proc_macro2::{Ident, Span, TokenStream},
-    quote::quote,
+    quote::{quote, ToTokens},
     syn::{GenericArgument, PathArguments, PathSegment, Type},
 };
 
@@ -14,7 +14,12 @@ pub(crate) trait TypeExt {
     fn gen_field_type(&self) -> TokenStream;
 
     /// Generate a check to verify this field has been seen.
-    fn gen_try_from_check(&self, struct_sexpr_name: &Ident, field_sexpr_name: &Ident, field_rust_name: &Ident) -> TokenStream;
+    fn gen_try_from_check(
+        &self,
+        struct_sexpr_name: &Ident,
+        field_sexpr_name: &Ident,
+        field_rust_name: &Ident,
+    ) -> TokenStream;
 
     /// Generate a `let <field_name> = None/Vec::new()` statement, as appropritate.
     fn gen_try_from_decl(&self, field_name: &Ident) -> TokenStream {
@@ -26,7 +31,12 @@ pub(crate) trait TypeExt {
     }
 
     /// Generate a match arm to parse a named field.
-    fn gen_try_from_match_arm(&self, struct_sexpr_name: &Ident, field_sexpr_name: &Ident, field_rust_name: &Ident) -> TokenStream;
+    fn gen_try_from_match_arm(
+        &self,
+        struct_sexpr_name: &Ident,
+        field_sexpr_name: &Ident,
+        field_rust_name: &Ident,
+    ) -> TokenStream;
 
     /// Generate a parser to parse a positional field.
     fn gen_try_from_pos_parser(&self) -> TokenStream;
@@ -64,6 +74,9 @@ pub(crate) trait TypeExt {
     /// If the type is a Vec<inner>, this returns `Some(inner)`.
     /// Otherwise, it returns `None`.
     fn vec_inner(&self) -> Option<&Type>;
+
+    /// Return a string representing the Rust expression for this type.
+    fn to_string(&self) -> String;
 }
 
 impl TypeExt for Type {
@@ -71,7 +84,12 @@ impl TypeExt for Type {
         quote! { #self }
     }
 
-    fn gen_try_from_check(&self, struct_sexpr_name: &Ident, field_sexpr_name: &Ident, field_rust_name: &Ident) -> TokenStream {
+    fn gen_try_from_check(
+        &self,
+        struct_sexpr_name: &Ident,
+        field_sexpr_name: &Ident,
+        field_rust_name: &Ident,
+    ) -> TokenStream {
         if self.is_option() || self.is_vec() {
             quote! {}
         } else {
@@ -83,7 +101,12 @@ impl TypeExt for Type {
         }
     }
 
-    fn gen_try_from_match_arm(&self, struct_name: &Ident, field_sexpr_name: &Ident, field_rust_name: &Ident) -> TokenStream {
+    fn gen_try_from_match_arm(
+        &self,
+        struct_name: &Ident,
+        field_sexpr_name: &Ident,
+        field_rust_name: &Ident,
+    ) -> TokenStream {
         let (ty, add) = if let Some(vec_ty) = self.vec_inner() {
             (
                 vec_ty,
@@ -290,6 +313,10 @@ impl TypeExt for Type {
         } else {
             None
         }
+    }
+
+    fn to_string(&self) -> String {
+        self.to_token_stream().to_string()
     }
 }
 

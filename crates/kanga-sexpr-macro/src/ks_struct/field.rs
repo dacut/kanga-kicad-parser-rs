@@ -1,5 +1,5 @@
 use {
-    crate::Shape,
+    super::{FieldMod, Shape},
     proc_macro2::TokenStream,
     quote::{quote, ToTokens},
     std::{
@@ -14,20 +14,20 @@ use {
 };
 
 /// A field within a `struct` declaration.
-pub(crate) struct Field {
-    pub(crate) meta: Vec<Attribute>,
-    pub(crate) shape: Shape,
+pub(super) struct Field {
+    meta: Vec<Attribute>,
+    shape: Shape,
 }
 
 /// A `Vec<[Field]>` that can be parsed.
 ///
 /// This expects a list of fields within braces (`{}`) that denote the interior of a struct.
-pub(crate) struct FieldVec(Vec<Field>);
+pub(super) struct FieldVec(Vec<Field>);
 
 impl Field {
     /// Generate a struct declaration for this field.
-    pub(crate) fn generate_decl(&self, vis: &Visibility) -> TokenStream {
-        self.shape.generate_decl(&self.meta, vis)
+    pub(super) fn gen_decl(&self, vis: &Visibility) -> TokenStream {
+        self.shape.gen_decl(&self.meta, vis, FieldMod::None)
     }
 }
 
@@ -76,5 +76,47 @@ impl Parse for FieldVec {
         }
 
         Ok(Self(fields))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, crate::TypeExt, pretty_assertions::assert_eq, quote::quote, syn::parse2};
+
+    #[test]
+    fn test_field_basic() {
+        let f: Field = parse2(quote! { [x => foo: i64] }).unwrap();
+        assert!(f.meta.is_empty());
+        let o = f.shape.option_inner().expect("Expected an option");
+        let ts = o.as_typed_symbol().expect("Expected a typed symbol");
+        assert_eq!(ts.sexpr_name, "x");
+        assert_eq!(ts.rust_name, "foo");
+        let Some(n) = ts.ty.as_numeric() else {
+            panic!("Type is not numeric: {:?}", ts.ty);
+        };
+        assert_eq!(n, "i64");
+    }
+
+    #[test]
+    fn test_fieldvec_basic() {
+        let f: FieldVec = parse2(quote! { [x => foo: i64] y => bar: String }).unwrap();
+        assert_eq!(f.len(), 2);
+        let f0 = &f[0];
+        assert!(f0.meta.is_empty());
+        let o = f0.shape.option_inner().expect("Expected an option");
+        let ts = o.as_typed_symbol().expect("Expected a typed symbol");
+        assert_eq!(ts.sexpr_name, "x");
+        assert_eq!(ts.rust_name, "foo");
+        let Some(n) = ts.ty.as_numeric() else {
+            panic!("Type is not numeric: {:?}", ts.ty);
+        };
+        assert_eq!(n, "i64");
+
+        let f1 = &f[1];
+        assert!(f1.meta.is_empty());
+        let ts = f1.shape.as_typed_symbol().expect("Expected a typed symbol");
+        assert_eq!(ts.sexpr_name, "y");
+        assert_eq!(ts.rust_name, "bar");
+        assert!(ts.ty.is_string());
     }
 }

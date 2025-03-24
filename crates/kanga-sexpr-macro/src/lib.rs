@@ -30,8 +30,8 @@ impl Decl {
     /// Generate the Rust code for the struct or enum.
     fn generate(&self) -> TokenStream {
         match self {
-            Decl::Enum(e) => e.generate(),
-            Decl::Struct(s) => s.generate(),
+            Decl::Enum(e) => e.gen(),
+            Decl::Struct(s) => s.gen(),
         }
     }
 }
@@ -145,7 +145,7 @@ mod tests {
                     red: f64
                     green: f64
                     blue: f64
-                    alpha: Option<f64>
+                    [alpha: f64]
                 )
             }
         };
@@ -161,7 +161,7 @@ mod tests {
                 pub red: f64,
                 pub green: f64,
                 pub blue: f64,
-                pub alpha: Option<f64>,
+                pub alpha: ::std::option::Option<f64>,
             }
         };
 

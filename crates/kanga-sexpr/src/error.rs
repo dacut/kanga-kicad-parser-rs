@@ -9,6 +9,7 @@ use {
 #[derive(Debug)]
 pub enum ParseError {
     DuplicateField(String, String, Value),
+    ExpectedEnumSymbol(Value, &'static [&'static str]),
     ExpectedList(Value),
     ExpectedListFloatHead(Value),
     ExpectedListIntHead(Value),
@@ -39,6 +40,7 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::DuplicateField(struct_name, field_name, value) => write!(f, "Duplicate {struct_name} field {field_name}: {value}"),
+            Self::ExpectedEnumSymbol(value, symbols) => write!(f, "Expected one of {}, got {}", symbols.join(", "), value),
             Self::ExpectedList(value) => write!(f, "Expected list, got {value}"),
             Self::ExpectedListFloatHead(value) => {
                 write!(f, "Expected list with floating-point head, got {value}")

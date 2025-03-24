@@ -14,7 +14,9 @@ sexpr! {
             [alpha: f64]
         )
     }
+}
 
+sexpr! {
     /// Font
     /// 
     /// The font to use for text. The format of this is
@@ -22,27 +24,31 @@ sexpr! {
     #[derive(Debug)]
     pub struct Font {
         (font
-            [(face String)]
+            [(face: String)]
             (size
                 height: f64
                 width: f64
             )
-            (thickness f64)
+            (thickness: f64)
             [bold]
             [italic]
-            [(line_spacing f64)]
+            [(line_spacing:f64)]
         )
     }
+}
 
+sexpr! {
     /// Coordinate Point List
     /// 
     /// A list of X/Y coordinate points formatted as `(pts (xy <x> <y>)...)`.
 
     #[derive(Debug)]
     pub struct Points {
-        (pts (xy XY)*)
+        (pts (xy:XY)*)
     }
+}
 
+sexpr! {
     /// Position
     /// 
     /// A two-dimensional position (in millimeters) and optional rotation (in degrees) of an object
@@ -60,7 +66,9 @@ sexpr! {
             [angle: f64]
         )
     }
+}
 
+sexpr! {
     /// Stroke definition
     /// 
     /// Defines how the outline of a graphical object is drawn. The format of this is
@@ -69,16 +77,18 @@ sexpr! {
     pub struct Stroke {
         (stroke
             /// The width of the stroke in millimeters.
-            (width f64)
+            (width: f64)
 
             /// The type of stroke.
-            (r#type StrokeType)
+            (r#type => stroke_type: StrokeType)
 
             /// The color of the stroke.
-            (color Color)
+            (color: Color)
         )
     }
+}
 
+sexpr! {
     /// Stroke line type
     /// 
     /// Defines the style of line to draw for a stroked outline. This is one of the following
@@ -93,7 +103,9 @@ sexpr! {
         default => Default,
         solid => Solid,
     }
+}
 
+sexpr! {
     /// Text effects
     /// 
     /// Defines how text is displayed.
@@ -109,40 +121,48 @@ sexpr! {
     pub struct TextEffect {
         (effects
             /// The font to use for the text.
-            (font Font)
+            (font: Font)
 
             /// The justification of the text.
-            [(justify TextJustify)]
+            [(justify: TextJustify)]
 
             /// Whether the text is hidden.
             [hide]
         )
     }
+}
 
+sexpr! {
     /// Test justification
     ///
     /// Defines how text is justified. Formatted as `(justify [left|right] [top|bottom] [mirror])`.
     #[derive(Debug)]
     pub struct TextJustify {
         (justify
-            [h_justify: HJusitfy]
+            [h_justify: HJustify]
             [v_justify: VJustify]
             [mirror]
         )
     }
+}
 
+sexpr! {
     #[derive(Debug)]
     pub enum HJustify {
         left => Left,
         right => Right,
     }
+}
 
+sexpr! {
     #[derive(Debug)]
     pub enum VJustify {
         top => Top,
         bottom => Bottom,
     }
+}
 
+sexpr! {
     #[derive(Debug)]
     pub struct XY {
         (xy
