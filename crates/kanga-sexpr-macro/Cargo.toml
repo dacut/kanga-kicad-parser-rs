@@ -12,6 +12,7 @@ description = "S-expression parser procedural macro"
 proc-macro = true
 
 [dependencies]
+log = "0.4.26"
 proc-macro2 = "1.0.94"
 quote = "1.0.39"
 syn = { version = "2.0.99", features = ["full", "extra-traits"] }

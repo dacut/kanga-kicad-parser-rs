@@ -29,6 +29,34 @@ impl Field {
     pub(super) fn gen_decl(&self, vis: &Visibility) -> TokenStream {
         self.shape.gen_decl(&self.meta, vis, FieldMod::None)
     }
+
+    /// Generate a parser for this field.
+    ///
+    /// The parser expects a `λv` variable, of type `lexpr::Value`, that is either a `Cons` or
+    /// null. If it's a const, the `car` is the value of this field (or the next field if this
+    /// field is optional and not present).
+    pub(super) fn gen_parser(&self) -> TokenStream {
+        self.shape.gen_parser(FieldMod::None)
+    }
+
+    /// Generate parser variable declarations for this field.
+    pub(super) fn gen_parser_var_decls(&self) -> TokenStream {
+        self.shape.gen_parser_var_decls(FieldMod::None)
+    }
+    
+    /// Generate struct field setters for this field.
+    pub(super) fn gen_struct_field_setters(&self) -> TokenStream {
+        self.shape.gen_struct_field_setters(FieldMod::None)
+    }
+
+    /// Return the field names used for the s-expression representing this
+    /// field in the struct.
+    ///
+    /// This depends on the shape of the field. For example, shapes like `(foo (bar:f64))` will not
+    /// generate a name for `foo`, but will generate a name for `bar`.
+    pub(super) fn field_names(&self) -> Vec<Ident> {
+        self.shape.field_names()
+    }
 }
 
 impl Display for Field {
@@ -67,6 +95,15 @@ impl DerefMut for FieldVec {
     }
 }
 
+impl<'a> IntoIterator for &'a FieldVec {
+    type Item = &'a Field;
+    type IntoIter = std::slice::Iter<'a, Field>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
 impl Parse for FieldVec {
     fn parse(input: ParseStream) -> ParseResult<Self> {
         let mut fields = Vec::new();
@@ -81,7 +118,13 @@ impl Parse for FieldVec {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::TypeExt, pretty_assertions::assert_eq, quote::quote, syn::parse2};
+    use {
+        super::*,
+        crate::{TypeCat, TypeExt},
+        pretty_assertions::assert_eq,
+        quote::quote,
+        syn::parse2,
+    };
 
     #[test]
     fn test_field_basic() {
@@ -117,6 +160,6 @@ mod tests {
         let ts = f1.shape.as_typed_symbol().expect("Expected a typed symbol");
         assert_eq!(ts.sexpr_name, "y");
         assert_eq!(ts.rust_name, "bar");
-        assert!(ts.ty.is_string());
+        assert_eq!(ts.ty.category(), TypeCat::String, "Type is not string: {:?}", ts.ty);
     }
 }

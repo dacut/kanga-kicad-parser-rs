@@ -24,8 +24,6 @@ pub(crate) enum Decl {
 /// A `Vec<[Decl]>` that can be parsed.
 pub(crate) struct DeclVec(Vec<Decl>);
 
-
-
 impl Decl {
     /// Generate the Rust code for the struct or enum.
     fn generate(&self) -> TokenStream {

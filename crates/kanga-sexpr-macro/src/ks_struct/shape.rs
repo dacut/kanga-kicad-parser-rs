@@ -1,12 +1,12 @@
 use {
     super::FieldMod,
-    crate::TypeExt,
+    crate::{TypeCat, TypeExt},
     proc_macro2::TokenStream,
     quote::{quote, ToTokens},
     std::fmt::{Display, Formatter, Result as FmtResult},
     syn::{
         bracketed, parenthesized,
-        parse::{Parse, ParseStream, Result as ParseResult, discouraged::Speculative},
+        parse::{discouraged::Speculative, Parse, ParseStream, Result as ParseResult},
         parse2,
         token::{Bracket, Paren},
         Attribute, Ident, Token, Type, Visibility,
@@ -16,8 +16,11 @@ use {
 /// The shape of an s-expression for a struct field.
 #[derive(Debug)]
 pub(super) enum Shape {
-    /// List of items with a symbol head.
-    List(ListShape),
+    /// List of items with a symbol head whose contents are destructured into struct fields.
+    DesList(DesList),
+
+    /// List with a symbol head represented by a type.
+    TypedList(TypedList),
 
     /// Optional item.
     Option(Box<Shape>),
@@ -32,20 +35,27 @@ pub(super) enum Shape {
     Vec(Box<Shape>),
 }
 
-/// A list shaped s-expression with a symbolic head.
+/// List of items with a symbol head whose contents are destructured into struct fields.
 #[derive(Debug)]
-pub(super) struct ListShape {
+pub(super) struct DesList {
     /// The symbolic head of the list.
+    pub(super) sexpr_head: Ident,
+
+    /// The items in the list.
+    pub(super) items: Vec<Shape>,
+}
+
+/// List of items with a symbol head represented by a type.
+#[derive(Debug)]
+pub(super) struct TypedList {
+    /// The symbolic head of the list
     pub(super) sexpr_head: Ident,
 
     /// The Rust name to use, if renamed with `=>`.
     pub(super) rust_name: Ident,
 
-    /// The type of the shape, if specified.
-    pub(super) ty: Option<Type>,
-
-    /// The items in the list.
-    pub(super) items: Vec<Shape>,
+    /// The type of the list.
+    pub(super) ty: Type,
 }
 
 /// A symbol without a type in an s-expression that might have a different name in Rust.
@@ -69,24 +79,96 @@ impl Shape {
     /// Generate a struct field declaration for this shape.
     pub(super) fn gen_decl(&self, meta: &[Attribute], vis: &Visibility, m: FieldMod) -> TokenStream {
         match self {
-            Shape::List(ls) => ls.generate_decl(meta, vis, m),
+            Shape::DesList(ls) => ls.gen_decl(meta, vis, m),
+            Shape::TypedList(ls) => ls.gen_decl(meta, vis, m),
             Shape::Option(inner) => {
-                assert!(m == FieldMod::None, "Cannot apply optional to field mods: {m:?}");
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to optional shape");
                 inner.gen_decl(meta, vis, FieldMod::Optional)
             }
             Shape::SymbolFlag(sym) => sym.gen_decl(meta, vis, m),
-            Shape::TypedSymbol(sym) => sym.gen_decl(meta, vis, m),
+            Shape::TypedSymbol(sym) => {
+                assert!(m != FieldMod::Vectored, "Cannot apply field mod {m:?} to typed symbol");
+                sym.gen_decl(meta, vis, m)
+            }
             Shape::Vec(inner) => {
-                assert!(m == FieldMod::None, "Cannot apply vector to field mods: {m:?}");
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to vectored shape");
                 inner.gen_decl(meta, vis, FieldMod::Vectored)
             }
         }
     }
 
+    /// Generate a parser for this shape.
+    ///
+    /// The parser expects a `cons` variable, of type `lexpr::Cons`, whose `car` is the value of
+    /// this field (or the next field if this field is optional and not present).
+    pub(super) fn gen_parser(&self, m: FieldMod) -> TokenStream {
+        match self {
+            Self::DesList(dl) => dl.gen_parser(m),
+            Self::TypedList(tl) => tl.gen_parser(m),
+            Self::Option(inner) => {
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to optional shape");
+                inner.gen_parser(FieldMod::Optional)
+            }
+            Self::SymbolFlag(sym) => sym.gen_parser(m),
+            Self::TypedSymbol(sym) => sym.gen_parser(m),
+            Self::Vec(inner) => {
+                assert!(m == FieldMod::None, "Cannot apply field mod {:?} to vectored shape", m);
+                inner.gen_parser(FieldMod::Vectored)
+            }
+        }
+    }
+
+    /// Generate variable declarations for this field.
+    pub(super) fn gen_parser_var_decls(&self, m: FieldMod) -> TokenStream {
+        match self {
+            Self::DesList(dl) => dl.gen_parser_var_decls(m),
+            Self::TypedList(tl) => tl.gen_parser_var_decls(m),
+            Self::Option(inner) => {
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to optional shape");
+                inner.gen_parser_var_decls(FieldMod::Optional)
+            }
+            Self::SymbolFlag(sym) => sym.gen_parser_var_decls(m),
+            Self::TypedSymbol(sym) => sym.gen_parser_var_decls(m),
+            Self::Vec(inner) => {
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to vectored shape");
+                inner.gen_parser_var_decls(FieldMod::Vectored)
+            }
+        }
+    }
+
+    /// Generate struct field setters for this shape.
+    pub(super) fn gen_struct_field_setters(&self, m: FieldMod) -> TokenStream {
+        match self {
+            Self::DesList(dl) => dl.gen_struct_field_setters(m),
+            Self::TypedList(tl) => tl.gen_struct_field_setters(m),
+            Self::Option(inner) => {
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to optional shape");
+                inner.gen_struct_field_setters(FieldMod::Optional)
+            }
+            Self::SymbolFlag(sym) => sym.gen_struct_field_setters(m),
+            Self::TypedSymbol(sym) => sym.gen_struct_field_setters(m),
+            Self::Vec(inner) => {
+                assert!(m == FieldMod::None, "Cannot apply field mod {m:?} to vectored shape");
+                inner.gen_struct_field_setters(FieldMod::Vectored)
+            }
+        }
+    }
+
+    /// Return the field names used for the s-expression representing this shape.
+    pub(super) fn field_names(&self) -> Vec<Ident> {
+        match self {
+            Shape::DesList(ls) => ls.field_names(),
+            Shape::TypedList(ls) => ls.field_names(),
+            Shape::Option(inner) => inner.field_names(),
+            Shape::SymbolFlag(sym) => sym.field_names(),
+            Shape::TypedSymbol(sym) => sym.field_names(),
+            Shape::Vec(inner) => inner.field_names(),
+        }
+    }
+
     /// If the shape is a list, return the inner [`ListShape`].
-    #[inline(always)]
-    pub(super) fn as_list_shape(&self) -> Option<&ListShape> {
-        if let Shape::List(ls) = self {
+    pub(super) fn as_list_shape(&self) -> Option<&DesList> {
+        if let Shape::DesList(ls) = self {
             Some(ls)
         } else {
             None
@@ -94,7 +176,6 @@ impl Shape {
     }
 
     /// If the shape is a symbol flag, return it.
-    #[inline(always)]
     pub(super) fn as_symbol_flag(&self) -> Option<&SymbolFlag> {
         if let Shape::SymbolFlag(sym) = self {
             Some(sym)
@@ -104,7 +185,6 @@ impl Shape {
     }
 
     /// If the shape is a typed symbol, return it.
-    #[inline(always)]
     pub(super) fn as_typed_symbol(&self) -> Option<&TypedSymbol> {
         if let Shape::TypedSymbol(sym) = self {
             Some(sym)
@@ -114,7 +194,6 @@ impl Shape {
     }
 
     /// If the shape is optional, return the inner item.
-    #[inline(always)]
     pub(super) fn option_inner(&self) -> Option<&Shape> {
         if let Shape::Option(inner) = self {
             Some(inner)
@@ -137,9 +216,31 @@ impl Shape {
             }
 
             let inner = Self::parse(&content)?;
-            Ok(Self::Option(Box::new(inner)))
+            if matches!(inner, Shape::SymbolFlag(_)) {
+                Ok(inner)
+            } else {
+                Ok(Self::Option(Box::new(inner)))
+            }
         } else if input.peek(Paren) {
-            Ok(Self::List(input.parse()?))
+            let content;
+            parenthesized!(content in input);
+
+            // Determine whether we have a typed list (`(head => rust_name: type)`) or a
+            // destructured list (`(head => rust_name item1 item2)`)
+            let f = content.fork();
+            let _sexpr_name: Ident = f.parse()?;
+            if f.peek(Token![=>]) {
+                let _: Token![=>] = f.parse()?;
+                let _rust_name: Ident = f.parse()?;
+            }
+
+            if f.peek(Token![:]) {
+                // This is a typed list
+                Ok(Self::TypedList(content.parse()?))
+            } else {
+                // This is a destructured list
+                Ok(Self::DesList(content.parse()?))
+            }
         } else if input.peek(Ident) {
             let sym: TypedSymbol = input.parse()?;
             Ok(Self::TypedSymbol(sym))
@@ -152,7 +253,8 @@ impl Shape {
 impl Display for Shape {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Shape::List(items) => Display::fmt(items, f),
+            Shape::DesList(items) => Display::fmt(items, f),
+            Shape::TypedList(items) => Display::fmt(items, f),
             Shape::Option(inner) => write!(f, "[{inner}]"),
             Shape::SymbolFlag(sym) => Display::fmt(sym, f),
             Shape::TypedSymbol(ident) => Display::fmt(ident, f),
@@ -173,47 +275,85 @@ impl Parse for Shape {
     }
 }
 
-impl ListShape {
-    fn generate_decl(&self, meta: &[Attribute], vis: &Visibility, m: FieldMod) -> TokenStream {
+impl DesList {
+    fn gen_decl(&self, meta: &[Attribute], vis: &Visibility, m: FieldMod) -> TokenStream {
         let mut result = TokenStream::new();
-        let rust_name = &self.rust_name;
-        let ty = &self.ty;
-
-        if let Some(ty) = ty {
-            // Type is specified; declare a struct field at this level of the list.
-            assert!(self.items.is_empty(), "Type specified for list with items");
-
-            if rust_name != "_" {
-                for meta_item in meta {
-                    result.extend(meta_item.to_token_stream());
-                }
-
-                result.extend(quote! { #vis #rust_name: });
-
-                result.extend(match m {
-                    FieldMod::None => quote! { #ty, },
-                    FieldMod::Optional => quote! { ::std::option::Option<#ty>, },
-                    FieldMod::Vectored => quote! { ::std::vec::Vec<#ty>, },
-                });
-            }
-        } else {
-            // No type specified; recurse through the list levels.
-            for item in &self.items {
-                result.extend(item.gen_decl(meta, vis, m));
-            }
+        for item in &self.items {
+            result.extend(item.gen_decl(meta, vis, m));
         }
 
         result
     }
+
+    /// Generate a parser for this destructured list.
+    fn gen_parser(&self, m: FieldMod) -> TokenStream {
+        let sexpr_head = &self.sexpr_head;
+        let mut item_parsers = TokenStream::new();
+        for item in &self.items {
+            item_parsers.extend(item.gen_parser(m));
+        }
+
+        let not_list_else = match m {
+            FieldMod::None => quote! {
+                else { return Err(::kanga_sexpr::ParseError::ExpectedList(λv.clone())); }
+            },
+            _ => quote! {},
+        };
+
+        let not_sym_else = match m {
+            FieldMod::None => quote! {
+                else { return Err(::kanga_sexpr::ParseError::ExpectedSym(α.clone())); }
+            },
+            _ => quote! {},
+        };
+
+        quote! {
+            if let Some(λ) = λv.as_cons() {
+                let α = λ.car();
+                if α.as_symbol() == Some(stringify!(#sexpr_head)) {
+                    {
+                        let mut λv = λ.cdr();
+                        #item_parsers
+                    }
+                    λv = λ.cdr();
+                }
+                #not_sym_else
+            }
+            #not_list_else
+        }
+    }
+
+    /// Generate variable declarations for this destructured list.
+    fn gen_parser_var_decls(&self, m: FieldMod) -> TokenStream {
+        let mut result = TokenStream::new();
+        for item in &self.items {
+            result.extend(item.gen_parser_var_decls(m));
+        }
+        result
+    }
+
+    /// Generate struct field setters for this destructured list.
+    fn gen_struct_field_setters(&self, m: FieldMod) -> TokenStream {
+        let mut result = TokenStream::new();
+        for item in &self.items {
+            result.extend(item.gen_struct_field_setters(m));
+        }
+        result
+    }
+
+    /// Return the field names used for the s-expression representing this list shape.
+    fn field_names(&self) -> Vec<Ident> {
+        let mut result = Vec::new();
+        for item in &self.items {
+            result.extend(item.field_names());
+        }
+        result
+    }
 }
 
-impl Display for ListShape {
+impl Display for DesList {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         write!(f, "({}", self.sexpr_head)?;
-
-        if self.rust_name != self.sexpr_head {
-            write!(f, " => {}", self.rust_name)?;
-        }
 
         for item in &self.items {
             write!(f, " {}", item)?;
@@ -223,40 +363,248 @@ impl Display for ListShape {
     }
 }
 
-impl Parse for ListShape {
+impl Parse for DesList {
+    /// Parse a `DesList` shape from the input. This assumes the outer parentheses have already been consumed.
     fn parse(input: ParseStream) -> ParseResult<Self> {
-        let content;
-        parenthesized!(content in input);
+        let sexpr_head: Ident = input.parse()?;
+        let mut items = Vec::new();
+        while !input.is_empty() {
+            items.push(input.parse()?);
+        }
 
-        let sexpr_head: Ident = content.parse()?;
-        let rust_name: Ident = if content.peek(Token![=>]) {
-            let _: Token![=>] = content.parse()?;
-            content.parse()?
+        Ok(Self {
+            sexpr_head,
+            items,
+        })
+    }
+}
+
+impl TypedList {
+    fn gen_decl(&self, meta: &[Attribute], vis: &Visibility, m: FieldMod) -> TokenStream {
+        let ty = &self.ty;
+        let rust_name = &self.rust_name;
+        let mut result = TokenStream::new();
+
+        if rust_name != "_" {
+            for meta_item in meta {
+                result.extend(meta_item.to_token_stream());
+            }
+
+            result.extend(quote! { #vis #rust_name: });
+
+            result.extend(match m {
+                FieldMod::None => quote! { #ty, },
+                FieldMod::Optional => quote! { ::std::option::Option<#ty>, },
+                FieldMod::Vectored => quote! { ::std::vec::Vec<#ty>, },
+            });
+        }
+
+        result
+    }
+
+    /// Generate a parser for this typed list.
+    fn gen_parser(&self, m: FieldMod) -> TokenStream {
+        match m {
+            FieldMod::None => self.gen_std_parser(),
+            FieldMod::Optional => self.gen_optional_parser(),
+            FieldMod::Vectored => self.gen_vectored_parser(),
+        }
+    }
+
+    /// Generate parser variable declarations for this typed list.
+    fn gen_parser_var_decls(&self, m: FieldMod) -> TokenStream {
+        let rust_name = &self.rust_name;
+        if rust_name != "_" {
+            match m {
+                FieldMod::Vectored => quote! { let mut #rust_name = Vec::new(); },
+                _ => quote! { let #rust_name; },
+            }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Generate struct field setters for this typed list.
+    fn gen_struct_field_setters(&self, m: FieldMod) -> TokenStream {
+        let rust_name = &self.rust_name;
+        if rust_name != "_" {
+            quote! { #rust_name, }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Generate a standard parser for this typed list.
+    fn gen_std_parser(&self) -> TokenStream {
+        let sexpr_name = &self.sexpr_head;
+        let rust_name = &self.rust_name;
+        let ty = &self.ty;
+
+        let field_parser = match ty.category() {
+            TypeCat::Float => quote! {
+                α.as_f64().ok_or(::kanga_sexpr::ParseError::ExpectedFloat(α.clone()))?
+            },
+            TypeCat::Int => quote! {
+                α.as_i64().ok_or(::kanga_sexpr::ParseError::ExpectedInt(α.clone()))?
+            },
+            TypeCat::String => quote! {
+                α.as_str().ok_or(::kanga_sexpr::ParseError::ExpectedStr(α.clone()))?.to_string()
+            },
+            TypeCat::Uuid => quote! {
+                Uuid::from_str(
+                    α.as_str().ok_or(::kanga_sexpr::ParseError::ExpectedUuid(α.clone()))?)
+                    .map_err(|_| ::kanga_sexpr::ParseError::ExpectedUuid(α.clone()))?
+            },
+            TypeCat::General => quote! {
+                #ty::try_from(α)?
+            },
+            TypeCat::Unsupported => panic!("Unsupported type category for typed list: {:?}", ty),
+        };
+
+        quote! {
+            let Some(λ) = λv.as_cons() else {
+                return Err(::kanga_sexpr::ParseError::ExpectedList(λv.clone()));
+            };
+
+            let α = λ.car();
+            if α.as_symbol() == Some(stringify!(#sexpr_name)) {
+                #rust_name = #field_parser;
+                λv = λ.cdr();
+            } else {
+                return Err(::kanga_sexpr::ParseError::ExpectedSym(α.clone()));
+            }
+            drop(α);
+            drop(λ);
+        }
+    }
+
+    fn gen_optional_parser(&self) -> TokenStream {
+        let sexpr_name = &self.sexpr_head;
+        let rust_name = &self.rust_name;
+        let ty = &self.ty;
+
+        let field_parser = match ty.category() {
+            TypeCat::Float => quote! {
+                α.as_f64().ok_or(::kanga_sexpr::ParseError::ExpectedFloat(α.clone()))?
+            },
+            TypeCat::Int => quote! {
+                α.as_i64().ok_or(::kanga_sexpr::ParseError::ExpectedInt(α.clone()))?
+            },
+            TypeCat::String => quote! {
+                α.as_str().ok_or(::kanga_sexpr::ParseError::ExpectedStr(α.clone()))?.to_string()
+            },
+            TypeCat::Uuid => quote! {
+                Uuid::from_str(
+                    α.as_str().ok_or(::kanga_sexpr::ParseError::ExpectedUuid(α.clone()))?)
+                    .map_err(|_| ::kanga_sexpr::ParseError::ExpectedUuid(α.clone()))?
+            },
+            TypeCat::General => quote! {
+                #ty::try_from(α)?
+            },
+            TypeCat::Unsupported => panic!("Unsupported type category for typed list: {:?}", ty),
+        };
+
+        quote! {
+            if let Some(λ) = λv.as_cons() {
+                let α = λ.car();
+
+                if α.as_symbol() == Some(stringify!(#sexpr_name)) {
+                    #rust_name = Some(#field_parser);
+                    λv = λ.cdr();
+                } else {
+                    #rust_name = None;
+                }
+            } else {
+                #rust_name = None;
+            }
+        }
+    }
+
+    fn gen_vectored_parser(&self) -> TokenStream {
+        let sexpr_name = &self.sexpr_head;
+        let rust_name = &self.rust_name;
+        let ty = &self.ty;
+
+        let field_parser = match ty.category() {
+            TypeCat::Float => quote! {
+                α.as_f64().ok_or(::kanga_sexpr::ParseError::ExpectedFloat(α.clone()))?
+            },
+            TypeCat::Int => quote! {
+                α.as_i64().ok_or(::kanga_sexpr::ParseError::ExpectedInt(α.clone()))?
+            },
+            TypeCat::String => quote! {
+                α.as_str().ok_or(::kanga_sexpr::ParseError::ExpectedStr(α.clone()))?.to_string()
+            },
+            TypeCat::Uuid => quote! {
+                Uuid::from_str(
+                    α.as_str().ok_or(::kanga_sexpr::ParseError::ExpectedUuid(α.clone()))?)
+                    .map_err(|_| ::kanga_sexpr::ParseError::ExpectedUuid(α.clone()))?
+            },
+            TypeCat::General => quote! {
+                #ty::try_from(α)?
+            },
+            TypeCat::Unsupported => panic!("Unsupported type category for typed list: {:?}", ty),
+        };
+
+        quote! {
+            // TypedList::gen_vectored_parser
+            if let Some(λ) = λv.as_cons() {
+                let α = λ.car();
+
+                if α.as_symbol() == Some(stringify!(#sexpr_name)) {
+                    #rust_name.push(#field_parser);
+                    λv = λ.cdr();
+                }
+            }
+        }
+    }
+
+    /// Return the field names used for the s-expression representing this list shape.
+    fn field_names(&self) -> Vec<Ident> {
+        if self.rust_name == "_" {
+            vec![]
+        } else {
+            vec![self.sexpr_head.clone()]
+        }
+    }
+}
+
+impl Display for TypedList {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        write!(f, "({}", self.sexpr_head)?;
+
+        if self.rust_name != self.sexpr_head {
+            write!(f, " => {}", self.rust_name)?;
+        }
+
+        write!(f, ": {}", self.ty.to_token_stream())?;
+
+        write!(f, ")")
+    }
+}
+
+impl Parse for TypedList {
+    /// Parse a `DesList` shape from the input. This assumes the outer parentheses have already been consumed.
+    fn parse(input: ParseStream) -> ParseResult<Self> {
+        let sexpr_head: Ident = input.parse()?;
+        let rust_name: Ident = if input.peek(Token![=>]) {
+            let _: Token![=>] = input.parse()?;
+            input.parse()?
         } else {
             sexpr_head.clone()
         };
 
-        let ty;
-        let mut items = Vec::new();
+        let _: Token![:] = input.parse()?;
+        let ty: Type = input.parse()?;
 
-        if content.peek(Token![:]) {
-            let _: Token![:] = content.parse()?;
-            ty = Some(content.parse()?);
-            if !content.is_empty() {
-                return Err(content.error("Unexpected tokens after list type"));
-            }
-        } else {
-            ty = None;
-            while !content.is_empty() {
-                items.push(content.parse()?);
-            }
+        if !input.is_empty() {
+            return Err(input.error("Unexpected tokens after typed list"));
         }
 
         Ok(Self {
             sexpr_head,
             rust_name,
             ty,
-            items,
         })
     }
 }
@@ -278,6 +626,76 @@ impl SymbolFlag {
 
         result
     }
+
+    /// Generate a parser for this symbol flag.
+    fn gen_parser(&self, m: FieldMod) -> TokenStream {
+        assert_eq!(m, FieldMod::None, "Cannot apply field mod {m:?} to symbol flag");
+        let sexpr_name = &self.sexpr_name;
+        let rust_name = &self.rust_name;
+
+        match m {
+            FieldMod::None => quote! {
+                let Some(λ) = λv.as_cons() else {
+                    return Err(::kanga_sexpr::ParseError::ExpectedList(λv.clone()));
+                };
+                let α = λ.car();
+                if α.as_symbol() == Some(stringify!(#sexpr_name)) {
+                    #rust_name = true;
+                    λv = λ.cdr();
+                } else {
+                    #rust_name = false;
+                }
+    
+                drop(α);
+                drop(λ);
+            },
+            FieldMod::Optional => quote! {
+                if let Some(λ) = λv.as_cons() {
+                    let α = λ.car();
+                    if α.as_symbol() == Some(stringify!(#sexpr_name)) {
+                        #rust_name = true;
+                        λv = λ.cdr();
+                    } else {
+                        #rust_name = false;
+                    }
+                } else {
+                    #rust_name = false;
+                }
+            },
+            _ => panic!("Cannot apply field mod {m:?} to symbol flag"),
+        }
+    }
+
+    /// Generate parser variable declarations for this symbol flag.
+    fn gen_parser_var_decls(&self, m: FieldMod) -> TokenStream {
+        assert_eq!(m, FieldMod::None, "Cannot apply field mod {m:?} to symbol flag");
+        let rust_name = &self.rust_name;
+        if rust_name != "_" {
+            quote! { let #rust_name; }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Generate struct field setters for this symbol flag.
+    fn gen_struct_field_setters(&self, m: FieldMod) -> TokenStream {
+        assert_eq!(m, FieldMod::None, "Cannot apply field mod {m:?} to symbol flag");
+        let rust_name = &self.rust_name;
+        if rust_name != "_" {
+            quote! { #rust_name, }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// Return the field names used for the s-expression representing this list shape.
+    fn field_names(&self) -> Vec<Ident> {
+        if self.rust_name == "_" {
+            vec![]
+        } else {
+            vec![self.sexpr_name.clone()]
+        }
+    }
 }
 
 impl Display for SymbolFlag {
@@ -293,26 +711,25 @@ impl Display for SymbolFlag {
 }
 
 impl Parse for SymbolFlag {
-        /// Attempt to parse a `SymbolFlag` _without_ the exterior brackets.
-        fn parse(input: ParseStream) -> ParseResult<Self> {
-            let sexpr_name: Ident = input.parse()?;
-            let rust_name: Ident = if input.peek(Token![=>]) {
-                let _: Token![=>] = input.parse()?;
-                input.parse()?
-            } else {
-                sexpr_name.clone()
-            };
-    
-            if !input.is_empty() {
-                return Err(input.error("Unexpected tokens after symbol flag"));
-            }
-    
-            Ok(Self {
-                rust_name,
-                sexpr_name,
-            })
+    /// Attempt to parse a `SymbolFlag` _without_ the exterior brackets.
+    fn parse(input: ParseStream) -> ParseResult<Self> {
+        let sexpr_name: Ident = input.parse()?;
+        let rust_name: Ident = if input.peek(Token![=>]) {
+            let _: Token![=>] = input.parse()?;
+            input.parse()?
+        } else {
+            sexpr_name.clone()
+        };
+
+        if !input.is_empty() {
+            return Err(input.error("Unexpected tokens after symbol flag"));
         }
-        
+
+        Ok(Self {
+            rust_name,
+            sexpr_name,
+        })
+    }
 }
 impl TypedSymbol {
     pub(super) fn gen_decl(&self, meta: &[Attribute], vis: &Visibility, m: FieldMod) -> TokenStream {
@@ -334,6 +751,228 @@ impl TypedSymbol {
         }
 
         result
+    }
+
+    /// Generate a parser for this typed symbol.
+    fn gen_parser(&self, m: FieldMod) -> TokenStream {
+        match m {
+            FieldMod::None => self.gen_std_parser(),
+            FieldMod::Optional => self.gen_optional_parser(),
+            FieldMod::Vectored => self.gen_vectored_parser(),
+        }
+    }
+
+    fn gen_std_parser(&self) -> TokenStream {
+        let sexpr_name = &self.sexpr_name;
+        let rust_name = &self.rust_name;
+        let ty = &self.ty;
+
+        let ty_parser = match ty.category() {
+            TypeCat::Float => quote! {
+                if let Some(φ) = α.as_f64() {
+                    #rust_name = φ;
+                    λv = λ.cdr();
+                } else {
+                    return Err(::kanga_sexpr::ParseError::ExpectedFloat(α.clone()));
+                }
+            },
+            TypeCat::Int => quote! {
+                if let Some(φ) = α.as_i64() {
+                    #rust_name = φ;
+                    λv = λ.cdr();
+                } else {
+                    return Err(::kanga_sexpr::ParseError::ExpectedInt(α.clone()));
+                }
+            },
+            TypeCat::String => quote! {
+                if let Some(φ) = α.as_str() {
+                    #rust_name = φ.to_string();
+                    λv = λ.cdr();
+                } else {
+                    return Err(::kanga_sexpr::ParseError::ExpectedStr(α.clone()));
+                }
+            },
+            TypeCat::Uuid => quote! {
+                if let Some(φ) = α.as_str() {
+                    match ::uuid::Uuid::parse_str(φ) {
+                        Ok(φ) => {
+                            #rust_name = φ;
+                            λv = λ.cdr();
+                        },
+                        Err(_) => return Err(::kanga_sexpr::ParseError::ExpectedUuid(α.clone())),
+                    }
+                } else {
+                    return Err(::kanga_sexpr::ParseError::ExpectedUuid(α.clone()));
+                }
+            },
+            TypeCat::General => quote! {
+                #rust_name = #ty :: try_from(α)?;
+                λv = λ.cdr();
+            },
+            TypeCat::Unsupported => panic!("Unsupported type category for typed symbol: {:?}", ty),
+        };
+        quote! {
+            let Some(λ) = λv.as_cons() else {
+                return Err(::kanga_sexpr::ParseError::ExpectedList(λv.clone()));
+            };
+            let α = λ.car();
+            #ty_parser
+            drop(α);
+            drop(λ);
+        }
+    }
+
+    fn gen_optional_parser(&self) -> TokenStream {
+        let sexpr_name = &self.sexpr_name;
+        let rust_name = &self.rust_name;
+        let ty = &self.ty;
+
+        let ty_parser = match ty.category() {
+            TypeCat::Float => quote! {
+                if let Some(φ) = α.as_f64() {
+                    #rust_name = Some(φ);
+                    λv = λ.cdr();
+                } else {
+                    #rust_name = None;
+                }
+            },
+            TypeCat::Int => quote! {
+                if let Some(φ) = α.as_i64() {
+                    #rust_name = Some(φ);
+                    λv = λ.cdr();
+                } else {
+                    #rust_name = None;
+                }
+            },
+            TypeCat::String => quote! {
+                if let Some(φ) = α.as_str() {
+                    #rust_name = Some(φ.to_string());
+                    λv = λ.cdr();
+                } else {
+                    #rust_name = None;
+                }
+            },
+            TypeCat::Uuid => quote! {
+                if let Some(φ) = α.as_str() {
+                    match ::uuid::Uuid::parse_str(φ) {
+                        Ok(φ) => {
+                            #rust_name = Some(φ);
+                            λv = λ.cdr();
+                        }
+                        Err(_) => {
+                            #rust_name = None;
+                        }
+                    }
+                } else {
+                    #rust_name = None;
+                }
+            },
+            TypeCat::General => quote! {
+                if let Ok(φ) = #ty::try_from(α) {
+                    #rust_name = Some(φ);
+                    λv = λ.cdr();
+                } else {
+                    #rust_name = None;
+                }
+            },
+            TypeCat::Unsupported => panic!("Unsupported type category for typed symbol: {:?}", ty),
+        };
+
+        quote! {
+            if let Some(λ) = λv.as_cons() {
+                let α = λ.car();
+                #ty_parser
+                drop(α);
+                drop(λ);
+            } else {
+                #rust_name = None;
+            }
+        }
+    }
+
+    fn gen_vectored_parser(&self) -> TokenStream {
+        let sexpr_name = &self.sexpr_name;
+        let rust_name = &self.rust_name;
+        let ty = &self.ty;
+
+        let ty_parser = match ty.category() {
+            TypeCat::Float => quote! {
+                if let Some(φ) = α.as_f64() {
+                    #rust_name.push(φ);
+                    λv = λ.cdr();
+                }
+            },
+            TypeCat::Int => quote! {
+                if let Some(φ) = α.as_i64() {
+                    #rust_name.push(φ);
+                    λv = λ.cdr();
+                }
+            },
+            TypeCat::String => quote! {
+                if let Some(φ) = α.as_str() {
+                    #rust_name.push(φ.to_string());
+                    λv = λ.cdr();
+                }
+            },
+            TypeCat::Uuid => quote! {
+                if let Some(φ) = α.as_str() {
+                    if let Ok(φ) = ::uuid::Uuid::parse_str(φ) {
+                        #rust_name.push(φ);
+                        λv = λ.cdr();
+                    }
+                }
+            },
+            TypeCat::General => quote! {
+                if let Ok(φ) = #ty::try_from(α) {
+                    #rust_name.push(φ);
+                    λv = λ.cdr();
+                }
+            },
+            TypeCat::Unsupported => panic!("Unsupported type category for typed symbol: {:?}", ty),
+        };
+
+        quote! {
+            if let Some(λ) = λv.as_cons() {
+                let α = λ.car();
+                #ty_parser
+                drop(α);
+                drop(λ);
+            } else {
+                #rust_name = None;
+            }
+        }
+    }
+
+    /// Generate parser variable declarations for this typed symbol.
+    fn gen_parser_var_decls(&self, m: FieldMod) -> TokenStream {
+        let rust_name = &self.rust_name;
+        if rust_name != "_" {
+            match m {
+                FieldMod::Vectored => quote! { let mut #rust_name = Vec::new(); },
+                _ => quote! { let #rust_name; },
+            }
+        } else {
+            quote! {}
+        }
+    }
+    
+    /// Generate struct field setters for this typed symbol.
+    fn gen_struct_field_setters(&self, m: FieldMod) -> TokenStream {
+        let rust_name = &self.rust_name;
+        if rust_name != "_" {
+            quote! { #rust_name, }
+        } else {
+            quote! {}
+        }
+    }
+    
+    /// Return the field names used for the s-expression representing this typed symbol.
+    fn field_names(&self) -> Vec<Ident> {
+        if self.rust_name == "_" {
+            vec![]
+        } else {
+            vec![self.sexpr_name.clone()]
+        }
     }
 }
 
@@ -372,7 +1011,13 @@ impl Parse for TypedSymbol {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::TypeExt, pretty_assertions::assert_eq, quote::quote, syn::parse2};
+    use {
+        super::*,
+        crate::{TypeCat, TypeExt},
+        pretty_assertions::assert_eq,
+        quote::quote,
+        syn::parse2,
+    };
 
     /// Basic typed symbol parsing.
     #[test]
@@ -393,7 +1038,6 @@ mod tests {
         let s: Shape = parse2(quote! { (hello world:f64) }).unwrap();
         let ls = s.as_list_shape().expect("Expected a list shape");
         assert_eq!(ls.sexpr_head, "hello");
-        assert_eq!(ls.rust_name, "hello");
         assert_eq!(ls.items.len(), 1);
         let i0 = &ls.items[0];
         let i0 = i0.as_typed_symbol().expect("Expected a typed symbol");
@@ -420,14 +1064,13 @@ mod tests {
     }
 
     #[test]
-    fn option_list_shape_good() {
-        let s: Shape = parse2(quote! { [(hello => world x => foo: i64 [y => bar: String])]}).unwrap();
+    fn option_des_list_shape_good() {
+        let s: Shape = parse2(quote! { [(hello x => foo: i64 [y => bar: String])]}).unwrap();
         let o = s.option_inner().expect("Expected an option");
-        let Shape::List(ls) = &o else {
+        let Shape::DesList(ls) = &o else {
             panic!("Not a list shape: {:?}", o);
         };
         assert_eq!(ls.sexpr_head, "hello");
-        assert_eq!(ls.rust_name, "world");
         assert_eq!(ls.items.len(), 2);
         let i0 = &ls.items[0];
         let i0 = i0.as_typed_symbol().expect("Expected a typed symbol");
@@ -442,7 +1085,7 @@ mod tests {
         assert_eq!(n, "i64");
         assert_eq!(i1.sexpr_name, "y");
         assert_eq!(i1.rust_name, "bar");
-        assert!(i1.ty.is_string(), "Not a string: {:?}", i1.ty);
+        assert_eq!(i1.ty.category(), TypeCat::String, "Not a string: {:?}", i1.ty);
     }
 
     #[test]

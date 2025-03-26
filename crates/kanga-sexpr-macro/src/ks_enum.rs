@@ -66,7 +66,7 @@ impl EnumDecl {
         let mut result = TokenStream::new();
         let rust_name = &self.rust_name;
         let mut enum_expected = TokenStream::new(); // The expected symbols for the enum.
-        let mut match_arms = TokenStream::new();    // Handlers for the `match sym` statement.
+        let mut match_arms = TokenStream::new(); // Handlers for the `match sym` statement.
 
         for variant in &self.variants {
             // Add this variant's sexpr name to the array of expected symbols for the enum.
@@ -98,7 +98,6 @@ impl EnumDecl {
                 }
             }
         }
-        
     }
 
     /// Parse a struct declaration when the attributes and visibility have already been parsed.

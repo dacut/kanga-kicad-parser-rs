@@ -78,24 +78,30 @@ impl StructDecl {
         let mut result = TokenStream::new();
         let rust_name = &self.rust_name;
 
+        let mut field_parsers = TokenStream::new();
+        let mut field_var_decls = TokenStream::new();
+        let mut struct_field_setters = TokenStream::new();
+
+        for field in &self.fields {
+            field_var_decls.extend(field.gen_parser_var_decls());
+            field_parsers.extend(field.gen_parser());
+            struct_field_setters.extend(field.gen_struct_field_setters());
+        }
+
+        // We use Greek letters to avoid conflicts with field names.
+        // λv = the remaining cons expression as a value
+        // λ = the remaining cons expression
+        // α = the car of the cons expression, our current element
+        // φ = the value being extracted from the car
+
         quote! {
-            impl ::std::convert::TryFrom<&::lexpr::Cons> for #rust_name {
-                type Error = ::kanga_sexpr::ParseError;
-
-                fn try_from(cons: &::lexpr::Cons) -> ::std::result::Result<Self, Self::Error> {
-                    todo!("Implement TryFrom for struct")
-                }
-            }
-
             impl ::std::convert::TryFrom<&::lexpr::Value> for #rust_name {
                 type Error = ::kanga_sexpr::ParseError;
 
-                fn try_from(value: &::lexpr::Value) -> ::std::result::Result<Self, Self::Error> {
-                    let ::std::option::Option::Some(cons) = value.as_cons() else {
-                        return ::std::result::Result::Err(::kanga_sexpr::ParseError::ExpectedList(value.clone()));
-                    };
-
-                    Self::try_from(cons)
+                fn try_from(mut λv: &::lexpr::Value) -> ::std::result::Result<Self, Self::Error> {
+                    #field_var_decls
+                    #field_parsers
+                    Ok(Self { #struct_field_setters })
                 }
             }
         }

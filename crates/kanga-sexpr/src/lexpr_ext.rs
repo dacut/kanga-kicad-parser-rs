@@ -52,7 +52,7 @@ impl LexprExt for Cons {
     fn expect_cons_with_symbol_head(&self, symbol: &str) -> Result<&Value, ParseError> {
         let (sym, cdr) = self.expect_cons_with_any_symbol_head()?;
         if sym != symbol {
-            Err(ParseError::ExpectedSymbol(Value::Cons(self.clone()), symbol.to_string()))
+            Err(ParseError::ExpectedNamedSym(Value::Cons(self.clone()), symbol.to_string()))
         } else {
             Ok(cdr)
         }
@@ -63,36 +63,36 @@ impl LexprExt for Cons {
     }
 
     fn expect_symbol(&self, symbol: &str) -> Result<(), ParseError> {
-        Err(ParseError::ExpectedSymbol(Value::Cons(self.clone()), symbol.to_string()))
+        Err(ParseError::ExpectedNamedSym(Value::Cons(self.clone()), symbol.to_string()))
     }
 
     fn expect_cons_with_any_i64_head(&self) -> Result<(i64, &Value), ParseError> {
         let car = self.car();
         let cdr = self.cdr();
-        let num = car.as_number().ok_or_else(|| ParseError::ExpectedListIntHead(Value::Cons(self.clone())))?;
-        let num = num.as_i64().ok_or_else(|| ParseError::ExpectedListIntHead(Value::Cons(self.clone())))?;
+        let num = car.as_number().ok_or_else(|| ParseError::ExpectedInt(Value::Cons(self.clone())))?;
+        let num = num.as_i64().ok_or_else(|| ParseError::ExpectedInt(Value::Cons(self.clone())))?;
         Ok((num, cdr))
     }
 
     fn expect_cons_with_any_f64_head(&self) -> Result<(f64, &Value), ParseError> {
         let car = self.car();
         let cdr = self.cdr();
-        let num = car.as_number().ok_or_else(|| ParseError::ExpectedListFloatHead(Value::Cons(self.clone())))?;
-        let num = num.as_f64().ok_or_else(|| ParseError::ExpectedListFloatHead(Value::Cons(self.clone())))?;
+        let num = car.as_number().ok_or_else(|| ParseError::ExpectedFloat(Value::Cons(self.clone())))?;
+        let num = num.as_f64().ok_or_else(|| ParseError::ExpectedFloat(Value::Cons(self.clone())))?;
         Ok((num, cdr))
     }
 
     fn expect_cons_with_any_str_head(&self) -> Result<(&str, &Value), ParseError> {
         let car = self.car();
         let cdr = self.cdr();
-        let s = car.as_str().ok_or_else(|| ParseError::ExpectedListStrHead(Value::Cons(self.clone())))?;
+        let s = car.as_str().ok_or_else(|| ParseError::ExpectedStr(Value::Cons(self.clone())))?;
         Ok((s, cdr))
     }
 
     fn expect_cons_with_any_symbol_head(&self) -> Result<(&str, &Value), ParseError> {
         let car = self.car();
         let cdr = self.cdr();
-        let sym = car.as_symbol().ok_or_else(|| ParseError::ExpectedListSymbolHead(Value::Cons(self.clone())))?;
+        let sym = car.as_symbol().ok_or_else(|| ParseError::ExpectedSym(Value::Cons(self.clone())))?;
         Ok((sym, cdr))
     }
 }
@@ -121,7 +121,7 @@ impl LexprExt for Value {
     fn expect_cons_with_symbol_head(&self, symbol: &str) -> Result<&Value, ParseError> {
         let (sym, cdr) = self.expect_cons_with_any_symbol_head()?;
         if sym != symbol {
-            Err(ParseError::ExpectedSymbol(self.clone(), symbol.to_string()))
+            Err(ParseError::ExpectedNamedSym(self.clone(), symbol.to_string()))
         } else {
             Ok(cdr)
         }
@@ -137,7 +137,7 @@ impl LexprExt for Value {
 
     fn expect_symbol(&self, symbol: &str) -> Result<(), ParseError> {
         if self.as_symbol() != Some(symbol) {
-            Err(ParseError::ExpectedSymbol(self.clone(), symbol.to_string()))
+            Err(ParseError::ExpectedNamedSym(self.clone(), symbol.to_string()))
         } else {
             Ok(())
         }
@@ -147,8 +147,8 @@ impl LexprExt for Value {
         let cons = self.expect_cons()?;
         let car = cons.car();
         let cdr = cons.cdr();
-        let num = car.as_number().ok_or_else(|| ParseError::ExpectedListIntHead(self.clone()))?;
-        let num = num.as_i64().ok_or_else(|| ParseError::ExpectedListIntHead(self.clone()))?;
+        let num = car.as_number().ok_or_else(|| ParseError::ExpectedInt(self.clone()))?;
+        let num = num.as_i64().ok_or_else(|| ParseError::ExpectedInt(self.clone()))?;
         Ok((num, cdr))
     }
 
@@ -156,8 +156,8 @@ impl LexprExt for Value {
         let cons = self.expect_cons()?;
         let car = cons.car();
         let cdr = cons.cdr();
-        let num = car.as_number().ok_or_else(|| ParseError::ExpectedListFloatHead(self.clone()))?;
-        let num = num.as_f64().ok_or_else(|| ParseError::ExpectedListFloatHead(self.clone()))?;
+        let num = car.as_number().ok_or_else(|| ParseError::ExpectedFloat(self.clone()))?;
+        let num = num.as_f64().ok_or_else(|| ParseError::ExpectedFloat(self.clone()))?;
         Ok((num, cdr))
     }
 
@@ -165,7 +165,7 @@ impl LexprExt for Value {
         let cons = self.expect_cons()?;
         let car = cons.car();
         let cdr = cons.cdr();
-        let s = car.as_str().ok_or_else(|| ParseError::ExpectedListStrHead(self.clone()))?;
+        let s = car.as_str().ok_or_else(|| ParseError::ExpectedStr(self.clone()))?;
         Ok((s, cdr))
     }
 
@@ -173,7 +173,7 @@ impl LexprExt for Value {
         let cons = self.expect_cons()?;
         let car = cons.car();
         let cdr = cons.cdr();
-        let sym = car.as_symbol().ok_or_else(|| ParseError::ExpectedListSymbolHead(self.clone()))?;
+        let sym = car.as_symbol().ok_or_else(|| ParseError::ExpectedSym(self.clone()))?;
         Ok((sym, cdr))
     }
 }
